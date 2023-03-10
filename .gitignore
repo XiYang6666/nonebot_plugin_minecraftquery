@@ -3,3 +3,4 @@ __pycache__
 __init__new.py
 querier.py
 parser.py
+config_data.py

@@ -15,7 +15,7 @@ class Config(BaseModel, extra=Extra.ignore):
             "服务器版本: {server_version}\n"
             "在线人数: {server_players_online}/{server_players_max}\n"
             "ping: {server_latency}ms\n"
-            "图标: [CQ:image,url={server_favicon_path}]"
+            "图标: {server_favicon}"
         )
         server_bedrock_msg = (
             "服务器ip: {server_host}:{server_port}\n"

@@ -6,13 +6,15 @@ import asyncio
 import time
 import typing
 import json
+import re
 
 import nonebot
 from nonebot import get_driver, get_bot, get_bots, require, on_command, on_shell_command
 from nonebot.permission import SUPERUSER
-from nonebot.params import ShellCommandArgs
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
+from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegment
+from nonebot.internal.adapter.bot import Bot
 from nonebot.log import logger
+from nonebot.params import ShellCommandArgs
 from argparse import Namespace
 import mcstatus
 
@@ -23,11 +25,6 @@ from nonebot_plugin_apscheduler import scheduler
 from .config import Config
 global_config = get_driver().config
 plugin_config = Config.parse_obj(global_config)
-
-_sub_plugins = set()
-_sub_plugins |= nonebot.load_plugins(
-    str((Path(__file__).parent / "plugins").resolve())
-)
 
 
 class Server:
@@ -78,7 +75,7 @@ class Server:
         else:
             self.last_online_status = online_status
             return False
-        
+
     def get_format_dict(self):
         return {
             "server_name": self.name,
@@ -89,7 +86,7 @@ class Server:
 
     async def get_status_msg(self):
         """
-        格式化服务器信息字符串
+        获取服务器消息
         """
         format_data = self.get_format_dict()
         server_status = await self.status()
@@ -102,7 +99,7 @@ class Server:
             """
             服务器离线
             """
-            return (
+            return Message.template(
                 f"{plugin_config.format.server_title}\n"
                 f"{plugin_config.format.server_offline}"
             ).format(**format_data)
@@ -119,6 +116,7 @@ class Server:
             format_data["server_favicon_dataLink"] = server_status.favicon
             format_data["server_favicon_filename"] = server_favicon_filename
             format_data["server_favicon_path"] = f"{os.getcwd()}\\mcQuery\\favicon\\{server_favicon_filename}"
+            format_data["server_favicon"] = MessageSegment.image(server_favicon_data)
             # 处理服务器版本
             format_data["server_version"] = server_status.version.name
             format_data["server_version_name"] = server_status.version.name
@@ -126,7 +124,7 @@ class Server:
             # 处理玩家数量
             format_data["server_players_max"] = server_status.players.max
             format_data["server_players_online"] = server_status.players.online
-            return (
+            return Message.template(
                 f"{plugin_config.format.server_title}\n"
                 f"{plugin_config.format.server_java_msg}"
             ).format(**format_data)
@@ -143,12 +141,12 @@ class Server:
             format_data["server_players_max"] = server_status.players_max
             format_data["server_players_online"] = server_status.players_online
 
-            return (
+            return Message.template(
                 f"{plugin_config.format.server_title}\n"
                 f"{plugin_config.format.server_bedrock_msg}"
             ).format(**format_data)
         else:
-            return (
+            return Message.template(
                 f"{plugin_config.format.server_title}\n"
                 f"未知错误"
             ).format(**format_data)
@@ -180,19 +178,12 @@ class Group:
             )
             self.servers.append(server)
         return self
-    
-    def send_message(self, message:str):
+
+    def send_message(self, message: str):
         """
         向群聊发送消息
         """
-    
 
-class McQuery:
-    def __init__(self):
-        self.bots = get_bots()
-
-    
-    
 
 def init_folder():
     if not os.path.exists("mcQuery"):
@@ -200,17 +191,19 @@ def init_folder():
     if not os.path.exists("mcQuery\\favicon"):
         os.mkdir("mcQuery\\favicon")
     if not os.path.exists("mcQuery\\group_config.json"):
-        with open("mcQuery\\group_config.json","w",encoding="utf-8") as f:
+        with open("mcQuery\\group_config.json", "w", encoding="utf-8") as f:
             f.write("{}")
-    
+
 
 def read_group_config() -> dict:
-    with open("mcQuery\\group_config.json",encoding="utf-8") as f:
+    with open("mcQuery\\group_config.json", encoding="utf-8") as f:
         return json.load(f)
 
-def save_group_config(config:dict):
-    with open("mcQuery\\group_config.json","w",encoding="utf-8") as f:
-        json.dump(config,f,sort_keys=True, indent=4, separators=(',', ': '))
+
+def save_group_config(config: dict):
+    with open("mcQuery\\group_config.json", "w", encoding="utf-8") as f:
+        json.dump(config, f, sort_keys=True, indent=4, separators=(',', ': '))
+
 
 def get_group_dict() -> dict[str, Group]:
     """
@@ -222,6 +215,7 @@ def get_group_dict() -> dict[str, Group]:
         group = Group(group_id).load_config(group_data)
         group_dict[group_id] = group
     return group_dict
+
 
 init_folder()
 group_config = read_group_config()
@@ -235,13 +229,13 @@ async def queryServerStatusChanged():
     改变则向群聊发送消息
     """
     try:
-        bot = get_bot()
+        bots = get_bots()
     except:
         return
     # logger.debug(f"开始查询服务器在线状态")
     start_time = time.time()
 
-    async def async_func_query(group: Group, server: Server,):
+    async def async_func_query(bot: Bot, group: Group, server: Server,):
         start_query_time = time.time()
         online_status_changed = await server.is_online_status_changed()
         if online_status_changed:
@@ -256,26 +250,24 @@ async def queryServerStatusChanged():
             await bot.call_api("send_group_msg", group_id=group.group_id, message=message)
 
     tasks = []
-    for group in group_dict.values():
-        for server in group.servers:
-            tasks.append(asyncio.create_task(async_func_query(group, server)))
-    if not len(tasks) == 0:
+    for bot in bots.values():
+        for group in group_dict.values():
+            for server in group.servers:
+                tasks.append(asyncio.create_task(async_func_query(bot, group, server)))
+    if tasks:
         await asyncio.wait(tasks)
     # logger.debug(f"查询服务器在线完成,耗时 {((time.time()-start_time)*1000):.0f}s")
 
 
-
-
-
 query_command = on_shell_command("查询")
 # query_command = on_shell_command("查询",parser=querier_parser)
+
 
 @query_command.handle()
 async def queryAllServers(bot: Bot, event: GroupMessageEvent):
     """
     群聊查询服务器状态
     """
-    # 获取服务器类
     group = group_dict[str(event.group_id)]
     if not group.enable_query:
         # 群聊不允许查询直接提出
@@ -285,25 +277,25 @@ async def queryAllServers(bot: Bot, event: GroupMessageEvent):
     await bot.send(event, "查询中...")
 
     start_time = time.time()
-    server_message_dict: dict[Server, str] = {}  # 存储服务器信息
+    server_message_dict: dict[Server, typing.Any] = {}  # 存储服务器信息
 
     async def query(server: Server):
         # 查询服务器，将数据存到：server_message_dict
         start_query_time = time.time()
         server_message_dict[server] = await server.get_status_msg()
     tasks = [asyncio.create_task(query(server)) for server in group.servers]
-    if not len(tasks) == 0:
+    if tasks:
         await asyncio.wait(tasks)  # 等待所有服务器查询完成
-    msg_list = []  # 各个服务器的消息的列表
+    group_message = Message()  # 要发送的消息
     for server in group.servers:
-        # 按顺序将服务器消息插入列表
-        msg_list.append(server_message_dict[server])
+        # 拼接消息
+        group_message += server_message_dict[server]
+        group_message += "\n\n"
 
-    
-    group_message = "\n\n".join(msg_list) # 合并消息
     logger.info(f"查询所有服务器状态完成 群聊：{event.group_id} 查询者: {event.get_user_id()} 耗时: {(start_time-time.time())*1000:.0f}ms")
     logger.debug(f"查询结果：{server_message_dict}")
-    await bot.call_api("send_group_msg", group_id=group.group_id, message=group_message) # 调用 cqHttp api 发送消息(能解析CQ码)
+    # await bot.call_api("send_group_msg", group_id=group.group_id, message=group_message) # 调用 cqHttp api 发送消息(能解析CQ码)
+    await bot.send(event, group_message)
 
 
 debug_command = on_command("调试", permission=SUPERUSER)
@@ -311,8 +303,6 @@ debug_command = on_command("调试", permission=SUPERUSER)
 
 @debug_command.handle()
 async def debug(bot: Bot, event: GroupMessageEvent):
-    server = Server("a", "bedrock", "121.62.18.169", 48480)
+    server = Server("debug", "java", "2b2t.xin", 25565)
     result = await server.get_status_msg()
-    await bot.send(event, result)
-
-
+    await bot.send(event, result)  # type: ignore
