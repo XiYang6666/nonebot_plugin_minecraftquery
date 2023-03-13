@@ -3,7 +3,7 @@ from pydantic import BaseModel, Extra
 
 class Config(BaseModel, extra=Extra.ignore):
     DbPath: str = "mcs.db"
-    QueryInterval: int = 10
+    QueryInterval: int = 15
     
 
     class format:

@@ -290,7 +290,8 @@ async def queryAllServers(bot: Bot, event: GroupMessageEvent):
     for server in group.servers:
         # 拼接消息
         group_message += server_message_dict[server]
-        group_message += "\n\n"
+        if not server == group.servers[-1]: # 最后一个不添加换行
+            group_message += "\n\n"
 
     logger.info(f"查询所有服务器状态完成 群聊：{event.group_id} 查询者: {event.get_user_id()} 耗时: {(start_time-time.time())*1000:.0f}ms")
     logger.debug(f"查询结果：{server_message_dict}")
